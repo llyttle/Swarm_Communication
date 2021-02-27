@@ -1,0 +1,31 @@
+int buzzPin = 5;
+int buttonPin = 2;
+int buttonState = 0;
+
+void setup() {
+//  Serial.begin(9600);
+  pinMode(buzzPin, OUTPUT);  // sets the pin as output
+  pinMode(buttonPin, INPUT);
+
+  analogWrite(buzzPin, 0);
+}
+
+void loop() {
+  for (int i=0; i<=255; i++){
+    Buzz(i);
+    delay(10);
+  }
+  for (int i=0; i<=255; i++){
+    Buzz(255 - i);
+    delay(10);
+  }
+}
+
+void Buzz(int duty){
+  buttonState = digitalRead(buttonPin);
+  if (buttonState == HIGH){
+    analogWrite(buzzPin, duty);
+  } else {
+    analogWrite(buzzPin, 0);
+  }
+}
