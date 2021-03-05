@@ -1,0 +1,87 @@
+#include <SPI.h>  // File Write method for SD Card
+#include <SD.h> // SD Card library
+
+// Libraries for ICM20948 Accelerometer
+#include <Adafruit_ICM20X.h>
+#include <Adafruit_ICM20948.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+
+Adafruit_ICM20948 icm;
+uint16_t measurement_delay_us = 65535; // Delay between measurements for testing
+// For SPI mode, we need a CS pin
+#define ICM_CS 10
+// For software-SPI mode we need SCK/MOSI/MISO pins
+#define ICM_SCK 13
+#define ICM_MISO 12
+#define ICM_MOSI 11
+
+const int chipSelect = 10; // Pin for SD chip select (connect to CS on chip)
+
+int buzzPin = 5;  // PWM pin for Vibration motor control
+int buttonPin = 2;  // Digital read pin for button reading
+bool buttonState = LOW;  // Set initial state as BUTTON OFF
+bool lastState = LOW; // state used to detect button edge cases
+
+int counter = 0;  // counter used for ramping motor 
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(buzzPin, OUTPUT);
+  pinMode(buttonPin, INPUT);
+
+  analogWrite(buzzPin, 0);  // Turn Vibration motor OFF
+
+//  Serial.print("Initializing SD card...");
+//  // see if the card is present and can be initialized:
+//  if (!SD.begin(chipSelect)) {
+//    Serial.println("Card failed, or not present");
+//    // don't do anything more:
+//    while (1);
+//  }
+  Serial.println("CARD INITIALIZED");
+  Serial.println("Press Button to start logging data");
+}
+
+void loop() {
+  getButtonState(buttonPin);
+  if (buttonState == HIGH){
+    Buzz(counter);
+    
+    counter ++;     // TODO: switch counter to timer so change in amplitude is not dependent on program speed.
+    if (counter == 255) counter = 0;
+    delay(10);
+  }
+}
+
+//void WriteSD(int data){
+//  if (dataFile){
+//    dataFile.println(data);
+//    
+//  }
+//}
+
+void Buzz(int x){
+  int duty = -127*(cos(.0246*x)+1);
+  analogWrite(buzzPin, duty);
+}
+
+void getButtonState(int pin){
+  bool currentState = digitalRead(pin);
+  if (currentState != lastState && currentState == HIGH){
+    if (buttonState == LOW){
+      buttonState = HIGH;
+//      File dataFile = SD.open("Accelerometer_Test", FILE_WRITE) // open SD card as file. ONLY ONE CAN BE OPEN AT A TIME.
+      counter = 0;
+      Serial.println("======================");
+      Serial.println("Collecting Data...");
+    }
+    else{
+      buttonState = LOW;
+//      dataFile.close();
+      analogWrite(buzzPin, 0);
+      Serial.println("Stopped Collecting");
+    }
+  }
+  lastState = currentState;
+}
