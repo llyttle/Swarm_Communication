@@ -16,54 +16,96 @@ uint16_t measurement_delay_us = 65535; // Delay between measurements for testing
 #define ICM_MISO 12
 #define ICM_MOSI 11
 
-const int chipSelect = 10; // Pin for SD chip select (connect to CS on chip)
-
-int buzzPin = 5;  // PWM pin for Vibration motor control
-int buttonPin = 2;  // Digital read pin for button reading
+#define buzzPin 5  // PWM pin for Vibration motor control
+#define buttonPin 2  // Digital read pin for button reading
 bool buttonState = LOW;  // Set initial state as BUTTON OFF
 bool lastState = LOW; // state used to detect button edge cases
 
-int counter = 0;  // counter used for ramping motor 
+const int chipSelect = 10; // Pin for SD chip select (connect to CS on chip)
+
+uint8_t counter = 0;  // counter used for ramping motor 
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
+  while (!Serial)
+    delay(10); // will pause arduino until serial console opens
+
+  Serial.print("Initializing SD card...");
+  // Wait to find SD reader
+  if (!SD.begin(chipSelect)) {
+    Serial.println("Card failed, or not present");
+    // don't do anything more:
+    while (1) delay(10);
+  }
+  Serial.println("CARD INITIALIZED");
+  
+  Serial.print("Initializing Accelerometer...");
+  // Wait to find Accelerometer
+  if (!icm.begin_I2C()) {
+    Serial.println("Failed to find ICM20948 chip");
+    // don't do anything more:
+    while (1) delay(10);
+  }
+  Serial.println("ICM20948 INITIALIZED");
+
+  Serial.print("Accelerometer range set to: ");
+    switch (icm.getAccelRange()) {
+    case ICM20948_ACCEL_RANGE_2_G:
+      Serial.println("+-2G");
+      break;
+    case ICM20948_ACCEL_RANGE_4_G:
+      Serial.println("+-4G");
+      break;
+    case ICM20948_ACCEL_RANGE_8_G:
+      Serial.println("+-8G");
+      break;
+    case ICM20948_ACCEL_RANGE_16_G:
+      Serial.println("+-16G");
+      break;
+    }
+
+  uint16_t accel_divisor = icm.getAccelRateDivisor();
+  float accel_rate = 1125 / (1.0 + accel_divisor);
+  
   pinMode(buzzPin, OUTPUT);
   pinMode(buttonPin, INPUT);
 
   analogWrite(buzzPin, 0);  // Turn Vibration motor OFF
 
-//  Serial.print("Initializing SD card...");
-//  // see if the card is present and can be initialized:
-//  if (!SD.begin(chipSelect)) {
-//    Serial.println("Card failed, or not present");
-//    // don't do anything more:
-//    while (1);
-//  }
-  Serial.println("CARD INITIALIZED");
   Serial.println("Press Button to start logging data");
+  Serial.println();
 }
 
 void loop() {
   getButtonState(buttonPin);
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t mag;
+  sensors_event_t temp;
+  icm.getEvent(&accel, &gyro, &temp, &mag);
+  
   if (buttonState == HIGH){
     Buzz(counter);
     
+    WriteSD(accel.acceleration.z);
+    
     counter ++;     // TODO: switch counter to timer so change in amplitude is not dependent on program speed.
     if (counter == 255) counter = 0;
-    delay(10);
+    delay(100);
   }
 }
 
-//void WriteSD(int data){
+void WriteSD(int data){
+  Serial.println(data);
 //  if (dataFile){
 //    dataFile.println(data);
 //    
 //  }
-//}
+}
 
 void Buzz(int x){
   int duty = -127*(cos(.0246*x)+1);
-  analogWrite(buzzPin, duty);
+  analogWrite(buzzPin, x);
 }
 
 void getButtonState(int pin){
