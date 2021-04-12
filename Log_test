@@ -1,47 +1,156 @@
-#define right_IR 3
-#define left_IR 4
+#include <SPI.h>  // File Write method for SD Card
+#include <SD.h> // SD Card library
 
-#define kP 1
-#define kI 1
-#define kD 1
+// Libraries for ICM20948 Accelerometer
+#include <Adafruit_ICM20X.h>
+#include <Adafruit_ICM20948.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
 
-#define setpoint 0
+Adafruit_ICM20948 icm;  // Setup icm object
+uint16_t measurement_delay_us = 65535; // Delay between measurements for testing
+// For SPI mode, we need a CS pin
+#define ICM_CS 8
+// For software-SPI mode we need SCK/MOSI/MISO pins
+#define ICM_SCK 13
+#define ICM_MISO 12
+#define ICM_MOSI 11
 
-float P;
-float I;
-float D;
+#define SD_CS 10 // Pin for SD chip select (connect to CS on chip)
 
-float lastP;
+#define buzzPin 5  // PWM pin for Vibration motor control
+#define buttonPin 7  // Digital read pin for button reading
+#define chunk 16  // number of readings before writing to SD card
 
-unsigned long currentTime, previousTime, elapsedTime;
+#define PI 3.1415926535897932384626433832795
+
+bool buttonState = LOW;  // Set initial state as BUTTON OFF
+bool lastState = LOW; // state used to detect button edge cases
+bool recode = false;
+
+int start_time = 0;
+unsigned long elapsed_time;
+
+struct Datastore {
+  float x;
+};
+
+Datastore myData[chunk];
+Datastore newData[chunk];
+
+File dataFile;
 
 void setup() {
-  // put your setup code here, to run once:
-  pinMode(right_IR, INPUT);
-  pinMode(left_IR, INPUT);
+  Serial.begin(115200);
+  while (!Serial)
+    delay(10); // will pause arduino until serial console opens
+
+  pinMode(ICM_CS, INPUT);
+  pinMode(SD_CS, INPUT);
+
+  SPI.begin();
+
+  Serial.print(F("Initializing SD card..."));
+  // Wait to find SD reader
+  if (!SD.begin(SD_CS)) {
+    Serial.println(F("Card failed, or not present"));
+    return;
+  }
+  Serial.println(F("CARD INITIALIZED"));
+
+  Serial.print(F("Initializing Accelerometer..."));
+  // Wait to find Accelerometer
+  if (!icm.begin_SPI(ICM_CS)) {
+    Serial.println(F("Failed to find ICM20948 chip"));
+    return;
+  }
+  Serial.println(F("ICM20948 INITIALIZED"));
+
+  Serial.print(F("Accelerometer range set to: "));
+    switch (icm.getAccelRange()) {
+    case ICM20948_ACCEL_RANGE_2_G:
+      Serial.println(F("+-2G"));
+      break;
+    case ICM20948_ACCEL_RANGE_4_G:
+      Serial.println(F("+-4G"));
+      break;
+    case ICM20948_ACCEL_RANGE_8_G:
+      Serial.println(F("+-8G"));
+      break;
+    case ICM20948_ACCEL_RANGE_16_G:
+      Serial.println(F("+-16G"));
+      break;
+    }
+
+  uint16_t accel_divisor = icm.getAccelRateDivisor();
+  float accel_rate = 1125 / (1.0 + accel_divisor);
+
+  pinMode(buzzPin, OUTPUT);
+  pinMode(buttonPin, INPUT);
+
+  analogWrite(buzzPin, 0);  // Turn Vibration motor OFF
+  
+  Serial.println(F("Press Button to start logging data"));
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  int input = digitalRead(right_IR) - digitalRead(left_IR);
-
-  float heading = computePID(input);
-  delay(100);
+  getButtonState(buttonPin);
   
-//  driveWheels(heading);
+  if (buttonState == HIGH){
+    elapsed_time = millis() - start_time;
+    
+    Buzz(1); //frequency of cos wave (Hz)
+    
+//    for (uint8_t i=0; i<16; i++){
+//      myData[i].x = getAccel();
+//    }
+    
+//    Serial.println(FreeRam());  // Uncomment to check if dynamic memory is large enough for writing (between 300-400 bytes)
+
+    if (dataFile) {
+      dataFile.println(getAccel());
+//      dataFile.print(", ");
+//      dataFile.println(elapsed_time);
+    }
+    else Serial.println(F("No dataFile"));
+  }
 }
 
-float computePID(int input) {
-  currentTime = millis();
-  elapsedTime = currentTime - previousTime;
+void Buzz(int freq){
+  int duty = -127*(cos((freq*elapsed_time*PI)/500)-1);
+  analogWrite(buzzPin, duty);
+//  Serial.println(duty);
+}
 
-  P = setpoint - input;
-  I = P * elapsedTime;
-  D = (P - lastP)/elapsedTime;
+float getAccel(){
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t mag;
+  sensors_event_t temp;
+  icm.getEvent(&accel, &gyro, &temp, &mag);
 
-  lastP = P;
-  previousTime = currentTime;
+  return accel.acceleration.z;
+}
 
-  return kP*P + kI*I + kD*D;
-  
+void getButtonState(int pin){
+  bool currentState = digitalRead(pin);
+  if (currentState != lastState && currentState == HIGH){
+    if (buttonState == LOW){
+      buttonState = HIGH;
+      start_time = millis();
+      dataFile = SD.open("RAW.txt", FILE_WRITE); // open SD card as file. ONLY ONE CAN BE OPEN AT A TIME.
+      Serial.println(F("======================"));
+      Serial.println(F("Collecting Data..."));
+    }
+    else{
+      buttonState = LOW;
+      recode = true;
+      analogWrite(buzzPin, 0);
+      dataFile.println(elapsed_time);
+      dataFile.close();
+      Serial.println(F("Stopped Collecting"));
+//      Serial.write(dataFile.read((uint8_t *)&data, sizeof(data)));
+    }
+  }
+  lastState = currentState;
 }
