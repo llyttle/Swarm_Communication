@@ -31,14 +31,11 @@ bool recode = false;
 int start_time = 0;
 unsigned long elapsed_time;
 
-struct Datastore {
-  float x;
-};
-
-Datastore myData[chunk];
-Datastore newData[chunk];
+float freq = 0.5;
 
 File dataFile;
+
+//SETUP ===============================================================================================================
 
 void setup() {
   Serial.begin(115200);
@@ -93,33 +90,31 @@ void setup() {
   Serial.println(F("Press Button to start logging data"));
 }
 
+//LOOP ================================================================================================================
+
 void loop() {
   getButtonState(buttonPin);
   
   if (buttonState == HIGH){
     elapsed_time = millis() - start_time;
     
-    Buzz(1); //frequency of cos wave (Hz)
-    
-//    for (uint8_t i=0; i<16; i++){
-//      myData[i].x = getAccel();
-//    }
+    Buzz(false); //true = continuous   false = discrete
     
 //    Serial.println(FreeRam());  // Uncomment to check if dynamic memory is large enough for writing (between 300-400 bytes)
-
-    if (dataFile) {
-      dataFile.println(getAccel());
-//      dataFile.print(", ");
-//      dataFile.println(elapsed_time);
-    }
+    if (dataFile) dataFile.println(getAccel());
     else Serial.println(F("No dataFile"));
   }
 }
 
-void Buzz(int freq){
-  int duty = -127*(cos((freq*elapsed_time*PI)/500)-1);
-  analogWrite(buzzPin, duty);
-//  Serial.println(duty);
+//FUNCTIONS ===========================================================================================================
+
+void Buzz(bool type){
+  float duty = -127*(cos((freq*elapsed_time*PI)/500)-1);
+  if (type == true) analogWrite(buzzPin, duty);
+  else {
+    if (duty >= 127) analogWrite(buzzPin, 185);
+    else analogWrite(buzzPin, 216);
+  }
 }
 
 float getAccel(){
@@ -147,9 +142,9 @@ void getButtonState(int pin){
       recode = true;
       analogWrite(buzzPin, 0);
       dataFile.println(elapsed_time);
+      dataFile.println(freq);
       dataFile.close();
       Serial.println(F("Stopped Collecting"));
-//      Serial.write(dataFile.read((uint8_t *)&data, sizeof(data)));
     }
   }
   lastState = currentState;
