@@ -1,0 +1,163 @@
+#include <SPI.h>  // File Write method for SD Card
+#include <SD.h> // SD Card library
+#include <CircularBuffer.h>
+
+CircularBuffer<byte,100> buffer;
+CircularBuffer<char,14> name_buffer;
+
+// Libraries for ICM20948 Accelerometer
+#include <Adafruit_ICM20X.h>
+#include <Adafruit_ICM20948.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+
+Adafruit_ICM20948 icm;  // Setup icm object
+uint16_t measurement_delay_us = 65535; // Delay between measurements for testing
+// For SPI mode, we need a CS pin
+#define ICM_CS 8
+// For software-SPI mode we need SCK/MOSI/MISO pins
+#define ICM_SCK 13
+#define ICM_MISO 12
+#define ICM_MOSI 11
+
+#define SD_CS 10 // Pin for SD chip select (connect to CS on chip)
+
+#define buzzPin 5  // PWM pin for Vibration motor control
+
+bool key_input = false;
+
+unsigned long start_time;
+
+int buzz_times[] = {250,750};
+
+bool last_isEmpty = true;
+
+File dataFile;
+
+//SETUP ===============================================================================================================
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial)
+    delay(10); // will pause arduino until serial console opens
+
+  pinMode(ICM_CS, INPUT);
+  pinMode(SD_CS, INPUT);
+
+  SPI.begin();
+
+  Serial.print(F("Initializing SD card..."));
+  // Wait to find SD reader
+  if (!SD.begin(SD_CS)) {
+    Serial.println(F("Card failed, or not present"));
+    return;
+  }
+  Serial.println(F("CARD INITIALIZED"));
+
+  Serial.print(F("Initializing Accelerometer..."));
+  // Wait to find Accelerometer
+  if (!icm.begin_SPI(ICM_CS)) {
+    Serial.println(F("Failed to find ICM20948 chip"));
+    return;
+  }
+  Serial.println(F("ICM20948 INITIALIZED"));
+
+  Serial.print(F("Accelerometer range set to: "));
+    switch (icm.getAccelRange()) {
+    case ICM20948_ACCEL_RANGE_2_G:
+      Serial.println(F("+-2G"));
+      break;
+    case ICM20948_ACCEL_RANGE_4_G:
+      Serial.println(F("+-4G"));
+      break;
+    case ICM20948_ACCEL_RANGE_8_G:
+      Serial.println(F("+-8G"));
+      break;
+    case ICM20948_ACCEL_RANGE_16_G:
+      Serial.println(F("+-16G"));
+      break;
+    }
+
+  uint16_t accel_divisor = icm.getAccelRateDivisor();
+  float accel_rate = 1125 / (1.0 + accel_divisor);
+
+  pinMode(buzzPin, OUTPUT);
+  analogWrite(buzzPin, 0);  // Turn Vibration motor OFF
+  
+  Serial.println(F("Enter Message to start logging data")); 
+}
+
+//LOOP ================================================================================================================
+
+void loop() {
+  while (Serial.available() > 0) {
+    byte byteRead = Serial.read();
+    for (byte i=0;i<7;i++) buffer.push(bitRead(byteRead, 6-i));
+    name_buffer.push(char(byteRead));
+    delay(10);
+  }
+  
+  if (Buzz_msg(3, 216)) {
+//    Serial.println(FreeRam());  // Uncomment to check if dynamic memory is large enough for writing (between 300-400 bytes)
+    if (dataFile) dataFile.println(getAccel());
+    else {
+      Serial.println(F("No dataFile"));
+    }
+  }
+}
+
+//FUNCTIONS ===========================================================================================================
+bool Buzz_msg(int freq, int amp) {
+  if (!buffer.isEmpty()) {
+    if (last_isEmpty) {
+      String name;
+      for (byte i=0;i<name_buffer.size();i++) name = name+String(name_buffer[i]);
+      name = name+".txt";
+      
+      dataFile = SD.open(name, FILE_WRITE); // open SD card as file. ONLY ONE CAN BE OPEN AT A TIME.
+
+      start_time = millis();
+      
+      Serial.println(F("=================================="));
+      Serial.print(F("Writing:  "));
+      for (byte i=0;i<buffer.size();i++) {
+        if (i % 7 == 0 && i>0) Serial.print(", ");
+        Serial.print(buffer[i]);
+      }
+      Serial.println();
+      Serial.println("To:       "+name);
+    }
+//    
+    if (millis()-start_time < buzz_times[buffer[0]]/freq) analogWrite(buzzPin, amp);
+    else if (millis()-start_time < (buzz_times[buffer[0]]+250)/freq) analogWrite(buzzPin, 0);
+    else {
+      start_time = millis();
+      buffer.shift();
+    }
+
+    last_isEmpty = false;
+    return true;
+  }
+
+  else {
+    if (!last_isEmpty) {
+      Serial.println(F("..."));
+      dataFile.close();
+      name_buffer.clear();
+      delay(500);
+      Serial.println(F("Stopped Collecting"));
+    }
+    last_isEmpty = true;
+    return false;
+  }
+}
+
+float getAccel(){
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t mag;
+  sensors_event_t temp;
+  icm.getEvent(&accel, &gyro, &temp, &mag);
+
+  return accel.acceleration.z;
+}
